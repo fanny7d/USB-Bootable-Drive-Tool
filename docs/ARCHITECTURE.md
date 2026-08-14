@@ -7,6 +7,7 @@ USB Bootable Drive Tool is a small native AppKit application built directly with
 - `Sources/USBBootableDriveTool/main.swift`: application lifecycle, AppKit UI, disk discovery, safety checks, system authorization, privileged write orchestration, and in-app output monitoring.
 - `Assets/`: sidebar illustration, source app icon, and packaged ICNS icon.
 - `script/build_and_run.sh`: deterministic local build, bundle assembly, ad-hoc signing, launch, and diagnostics.
+- `script/package_dmg.sh`: reproducible arm64 DMG assembly, signature validation, disk-image verification, and SHA-256 generation.
 - `script/test.sh`: non-destructive repository validation used locally and in CI.
 - `script/generate_app_icon.sh`: optional icon regeneration; requires ImageMagick.
 

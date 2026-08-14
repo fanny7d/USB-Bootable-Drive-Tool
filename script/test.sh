@@ -9,6 +9,7 @@ ICON_FILE="$APP_BUNDLE/Contents/Resources/AppIcon.icns"
 zsh -n "$ROOT_DIR/build.command"
 zsh -n "$ROOT_DIR/script/build_and_run.sh"
 zsh -n "$ROOT_DIR/script/generate_app_icon.sh"
+zsh -n "$ROOT_DIR/script/package_dmg.sh"
 
 if /usr/bin/xcrun --find swift-format >/dev/null 2>&1; then
   /usr/bin/xcrun swift-format lint --strict "$ROOT_DIR/Sources/USBBootableDriveTool/main.swift"

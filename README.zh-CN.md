@@ -11,6 +11,8 @@
 
 ![应用截图](docs/app-screenshot.png)
 
+新版响应式工作区把镜像与目标盘集中在“制作准备”卡片中，制作状态和实时输出使用独立的弹性区域；长文件名和设备名会被稳定省略，不再撑大窗口。
+
 > [!CAUTION]
 > 写入镜像会永久覆盖所选 U 盘。确认前请备份重要数据，并核对设备名称、容量和磁盘编号。
 
@@ -32,9 +34,20 @@
 ## 系统要求
 
 - macOS 13 Ventura 或更高版本。
+- 下载 DMG 需要 Apple Silicon Mac（arm64）。
 - Xcode Command Line Tools（`xcode-select --install`）。
 - 一个可移动 U 盘。
 - 与目标电脑兼容、支持原始 USB 写入的可启动 ISO/IMG。
+
+## 安装
+
+从 [GitHub Releases](https://github.com/fanny7d/USB-Bootable-Drive-Tool/releases/latest) 下载最新的 `macOS-arm64.dmg` 和对应 `.sha256` 文件，把两者放在同一目录后验证：
+
+```bash
+shasum -a 256 -c USB-Bootable-Drive-Tool-*-macOS-arm64.dmg.sha256
+```
+
+当前下载版本使用临时签名，尚未经过 Apple 公证；首次启动前请阅读[分发说明](#分发说明)。
 
 ## 构建运行
 
@@ -55,6 +68,14 @@ cd USB-Bootable-Drive-Tool
 ./script/build_and_run.sh --telemetry
 ./script/build_and_run.sh --verify
 ```
+
+生成与 Release 相同的 Apple Silicon DMG 和校验文件：
+
+```bash
+./script/package_dmg.sh
+```
+
+产物位于 `dist/`。脚本会拒绝非 arm64 二进制，并在完成前验证 App 签名和磁盘映像。
 
 ## 使用方法
 
@@ -90,7 +111,7 @@ App 不读取或保存管理员密码，所有任务输出都通过受控管道�
 
 ## 分发说明
 
-本地构建使用临时签名，适合开发验证。公开分发二进制应用需要 Apple Developer ID 签名和公证；从源码构建不需要付费开发者账号。
+本地构建和当前下载版本均使用临时签名。由于项目尚未配置 Apple Developer ID 证书，安装包没有经过 Apple 公证，macOS Gatekeeper 可能要求用户显式批准。自行从源码构建不需要付费开发者账号。
 
 ## 许可证
 

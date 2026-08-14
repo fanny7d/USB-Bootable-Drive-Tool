@@ -30,3 +30,13 @@ Only use a disposable physical USB drive with no important data.
 6. Boot-test it on compatible hardware.
 
 A successful build or UI scan is not evidence that destructive writing or booting has passed.
+
+## Release artifact validation
+
+Build the Apple Silicon release artifacts with:
+
+```bash
+./script/package_dmg.sh
+```
+
+The command succeeds only after confirming that the executable is arm64, validating the app's ad-hoc signature, verifying the DMG structure, and writing a matching SHA-256 file under `dist/`. These packaging checks do not constitute Apple Developer ID signing or notarization.

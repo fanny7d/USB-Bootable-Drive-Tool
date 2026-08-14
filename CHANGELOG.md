@@ -4,11 +4,14 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-08-14
+
 ### Added
 
 - In-app production log for validation, unmount, raw write progress, synchronization, completion, and failures.
 - macOS system authorization flow, allowing the authentication method permitted by system policy.
 - Native completion sheet summarizing the image, target device, elapsed time, and eject state.
+- Reproducible Apple Silicon DMG packaging with a matching SHA-256 checksum.
 
 ### Changed
 
@@ -46,5 +49,6 @@ All notable changes to this project are documented here. The format follows [Kee
 - Disk identity and exact size are checked again before unmounting or writing.
 - Administrator credentials remain exclusively in the system Terminal and `sudo` flow.
 
-[Unreleased]: https://github.com/fanny7d/USB-Bootable-Drive-Tool/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/fanny7d/USB-Bootable-Drive-Tool/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/fanny7d/USB-Bootable-Drive-Tool/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/fanny7d/USB-Bootable-Drive-Tool/releases/tag/v1.1.0

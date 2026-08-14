@@ -11,6 +11,8 @@ A native macOS AppKit utility for writing ISO and IMG images to removable USB dr
 
 ![Application screenshot](docs/app-screenshot.png)
 
+The responsive workspace keeps preparation choices together, gives live activity its own flexible panel, and truncates long image or device names without resizing the window.
+
 > [!CAUTION]
 > Writing an image permanently overwrites the selected USB drive. Back up important data and verify the device name, capacity, and identifier before confirming.
 
@@ -32,9 +34,20 @@ A native macOS AppKit utility for writing ISO and IMG images to removable USB dr
 ## Requirements
 
 - macOS 13 Ventura or newer.
+- An Apple Silicon Mac (arm64) for the downloadable DMG.
 - Xcode Command Line Tools (`xcode-select --install`).
 - A removable USB drive.
 - A bootable/hybrid ISO or IMG compatible with the target computer.
+
+## Install
+
+Download the latest `macOS-arm64.dmg` and matching `.sha256` file from [GitHub Releases](https://github.com/fanny7d/USB-Bootable-Drive-Tool/releases/latest), then verify them in the same directory:
+
+```bash
+shasum -a 256 -c USB-Bootable-Drive-Tool-*-macOS-arm64.dmg.sha256
+```
+
+The downloadable build is ad-hoc signed and is not Apple-notarized. See [Distribution note](#distribution-note) before launching it.
 
 ## Build and run
 
@@ -57,6 +70,14 @@ Available development modes:
 ./script/build_and_run.sh --telemetry
 ./script/build_and_run.sh --verify
 ```
+
+Create the same Apple Silicon DMG and checksum used for releases:
+
+```bash
+./script/package_dmg.sh
+```
+
+Artifacts are written to `dist/`. The packaging script rejects non-arm64 binaries and verifies the app signature and disk image before returning success.
 
 ## Usage
 
@@ -102,7 +123,7 @@ Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) before openin
 
 ## Distribution note
 
-Local builds are ad-hoc signed for development. Public binary distribution requires an Apple Developer ID signature and notarization. Building from source does not require a paid Apple developer account.
+Local and current downloadable builds are ad-hoc signed. They are not Apple-notarized because this project does not yet have a configured Apple Developer ID certificate. macOS Gatekeeper may therefore require an explicit user approval. Building from source does not require a paid Apple developer account.
 
 ## License
 
