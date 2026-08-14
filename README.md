@@ -23,7 +23,7 @@ A native macOS AppKit utility for writing ISO and IMG images to removable USB dr
 - Revalidates disk identity and exact byte capacity before destructive work.
 - Uses the macOS system authorization UI instead of opening Terminal; macOS decides whether password, Touch ID, or Apple Watch is available.
 - Shows write state, `dd` progress, and errors in the app's **制作日志** panel.
-- Presents a native result sheet with image, target, elapsed time, eject state, and copyable logs.
+- Presents a native result sheet with image, target, elapsed time, and eject state.
 - Writes through `/dev/rdiskN`, then runs `sync` and safely ejects the drive.
 - Custom Dock/Finder icon, standard menus, and accessible UI labels.
 - Reproducible command-line build with no third-party runtime dependencies.

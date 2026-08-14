@@ -69,11 +69,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let diskPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let chooseButton = NSButton(title: "选择镜像…", target: nil, action: nil)
     private let refreshButton = NSButton(title: "刷新 U 盘", target: nil, action: nil)
-    private let copyLogButton = NSButton(title: "复制日志", target: nil, action: nil)
     private let writeButton = NSButton(title: "制作启动盘", target: nil, action: nil)
     private let statusLabel = NSTextField(labelWithString: "请选择镜像并插入 U 盘")
     private let spinner = NSProgressIndicator()
     private let logTextView = NSTextView()
+    private let activityIcon = NSImageView()
+    private let activityTitleLabel = NSTextField(labelWithString: "等待开始")
+    private let activitySubtitleLabel = NSTextField(labelWithString: "选择镜像和目标 U 盘后即可制作")
     private let imageStepIcon = NSImageView()
     private let diskStepIcon = NSImageView()
     private let writeStepIcon = NSImageView()
@@ -212,15 +214,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         chooseButton.controlSize = .large
         refreshButton.target = self
         refreshButton.action = #selector(refreshDisks)
+        refreshButton.title = ""
         refreshButton.image = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: "刷新")
-        refreshButton.imagePosition = .imageLeading
-        refreshButton.bezelStyle = .push
-        refreshButton.controlSize = .large
-        copyLogButton.target = self
-        copyLogButton.action = #selector(copyProductionLog)
-        copyLogButton.bezelStyle = .push
-        copyLogButton.controlSize = .large
-        copyLogButton.isEnabled = false
+        refreshButton.imagePosition = .imageOnly
+        refreshButton.bezelStyle = .texturedRounded
+        refreshButton.controlSize = .regular
+        refreshButton.toolTip = "刷新 U 盘"
+        refreshButton.setAccessibilityLabel("刷新 U 盘")
         writeButton.target = self
         writeButton.action = #selector(startWriting)
         writeButton.bezelStyle = .rounded
@@ -405,87 +405,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         subtitle.font = .systemFont(ofSize: 14)
         subtitle.textColor = .secondaryLabelColor
 
-        let imageWell = GlassPanelView(material: .contentBackground, radius: 11)
-        let imageIcon = NSImageView(
-            image: NSImage(systemSymbolName: "doc.badge.gearshape", accessibilityDescription: "系统镜像")!)
-        imageIcon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 18, weight: .regular)
-        imageIcon.contentTintColor = .secondaryLabelColor
-        imageWell.addSubview(imageIcon)
-        imageWell.addSubview(imageField)
-        imageWell.addSubview(chooseButton)
-        [imageIcon, imageField, chooseButton].forEach { $0.translatesAutoresizingMaskIntoConstraints = false }
-        NSLayoutConstraint.activate([
-            imageWell.heightAnchor.constraint(equalToConstant: 54),
-            imageIcon.leadingAnchor.constraint(equalTo: imageWell.leadingAnchor, constant: 16),
-            imageIcon.centerYAnchor.constraint(equalTo: imageWell.centerYAnchor),
-            imageIcon.widthAnchor.constraint(equalToConstant: 23),
-            imageField.leadingAnchor.constraint(equalTo: imageIcon.trailingAnchor, constant: 11),
-            imageField.centerYAnchor.constraint(equalTo: imageWell.centerYAnchor),
-            chooseButton.leadingAnchor.constraint(equalTo: imageField.trailingAnchor, constant: 12),
-            chooseButton.trailingAnchor.constraint(equalTo: imageWell.trailingAnchor, constant: -10),
-            chooseButton.centerYAnchor.constraint(equalTo: imageWell.centerYAnchor),
-            chooseButton.widthAnchor.constraint(equalToConstant: 112),
-        ])
-
-        diskPopup.controlSize = .large
-        let diskWell = GlassPanelView(material: .contentBackground, radius: 11)
-        let diskIcon = NSImageView(
-            image: NSImage(systemSymbolName: "externaldrive", accessibilityDescription: "目标 U 盘")!)
-        diskIcon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 18, weight: .regular)
-        diskIcon.contentTintColor = .secondaryLabelColor
-        diskWell.addSubview(diskIcon)
-        diskWell.addSubview(diskPopup)
-        [diskIcon, diskPopup].forEach { $0.translatesAutoresizingMaskIntoConstraints = false }
-        NSLayoutConstraint.activate([
-            diskWell.heightAnchor.constraint(equalToConstant: 54),
-            diskIcon.leadingAnchor.constraint(equalTo: diskWell.leadingAnchor, constant: 16),
-            diskIcon.centerYAnchor.constraint(equalTo: diskWell.centerYAnchor),
-            diskIcon.widthAnchor.constraint(equalToConstant: 23),
-            diskPopup.leadingAnchor.constraint(equalTo: diskIcon.trailingAnchor, constant: 7),
-            diskPopup.trailingAnchor.constraint(equalTo: diskWell.trailingAnchor, constant: -7),
-            diskPopup.centerYAnchor.constraint(equalTo: diskWell.centerYAnchor),
-        ])
-
-        let diskRow = NSStackView(views: [diskWell, refreshButton])
-        diskRow.orientation = .horizontal
-        diskRow.alignment = .centerY
-        diskRow.spacing = 10
-        diskWell.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        refreshButton.widthAnchor.constraint(equalToConstant: 108).isActive = true
-        diskWell.widthAnchor.constraint(equalTo: diskRow.widthAnchor, constant: -118).isActive = true
+        let preparationPanel = makePreparationPanel()
+        let activityPanel = makeLogPanel()
 
         let statusRow = NSStackView(views: [spinner, statusLabel])
         statusRow.orientation = .horizontal
         statusRow.alignment = .centerY
         statusRow.spacing = 8
 
-        let footer = NSStackView(views: [statusRow, copyLogButton, writeButton])
+        let footerSpacer = NSView()
+        footerSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        footerSpacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let footer = NSStackView(views: [statusRow, footerSpacer, writeButton])
         footer.orientation = .horizontal
         footer.alignment = .centerY
         footer.spacing = 16
-        statusRow.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        copyLogButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 92).isActive = true
+        statusRow.setContentHuggingPriority(.required, for: .horizontal)
         writeButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 126).isActive = true
 
-        let imageSection = makeSection(title: "选择系统镜像", content: imageWell)
-        let diskSection = makeSection(title: "选择目标 U 盘", content: diskRow)
-        let logSection = makeSection(title: "制作日志", content: makeLogPanel())
         let content = NSStackView(views: [
             title,
             subtitle,
-            imageSection,
-            diskSection,
-            logSection,
+            preparationPanel,
+            activityPanel,
             footer,
         ])
         content.orientation = .vertical
         content.alignment = .leading
         content.spacing = 18
         content.setCustomSpacing(7, after: title)
-        content.setCustomSpacing(26, after: subtitle)
-        content.setCustomSpacing(18, after: imageSection)
-        content.setCustomSpacing(22, after: diskSection)
-        content.setCustomSpacing(14, after: logSection)
+        content.setCustomSpacing(24, after: subtitle)
+        content.setCustomSpacing(16, after: preparationPanel)
+        content.setCustomSpacing(14, after: activityPanel)
         content.translatesAutoresizingMaskIntoConstraints = false
         workspace.addSubview(content)
 
@@ -495,24 +446,143 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             content.topAnchor.constraint(equalTo: workspace.topAnchor, constant: 72),
             content.bottomAnchor.constraint(lessThanOrEqualTo: workspace.bottomAnchor, constant: -34),
             subtitle.widthAnchor.constraint(equalTo: content.widthAnchor),
-            imageWell.widthAnchor.constraint(equalTo: content.widthAnchor),
-            diskRow.widthAnchor.constraint(equalTo: content.widthAnchor),
-            logSection.widthAnchor.constraint(equalTo: content.widthAnchor),
+            preparationPanel.widthAnchor.constraint(equalTo: content.widthAnchor),
+            activityPanel.widthAnchor.constraint(equalTo: content.widthAnchor),
             footer.widthAnchor.constraint(equalTo: content.widthAnchor),
         ])
         return workspace
     }
 
+    private func makePreparationPanel() -> NSView {
+        let panel = GlassPanelView(material: .contentBackground, radius: 14)
+
+        let heading = NSTextField(labelWithString: "制作准备")
+        heading.font = .systemFont(ofSize: 15, weight: .semibold)
+        let hint = NSTextField(labelWithString: "确认镜像与目标设备")
+        hint.font = .systemFont(ofSize: 12)
+        hint.textColor = .secondaryLabelColor
+        let header = NSStackView(views: [heading, hint])
+        header.orientation = .vertical
+        header.alignment = .leading
+        header.spacing = 2
+
+        chooseButton.title = "选择…"
+        chooseButton.controlSize = .regular
+        chooseButton.widthAnchor.constraint(equalToConstant: 82).isActive = true
+
+        let imageRow = makePreparationRow(
+            symbol: "doc.badge.gearshape",
+            title: "系统镜像",
+            detail: imageField,
+            controls: [chooseButton]
+        )
+
+        diskPopup.controlSize = .regular
+        diskPopup.widthAnchor.constraint(equalToConstant: 282).isActive = true
+        refreshButton.widthAnchor.constraint(equalToConstant: 32).isActive = true
+        let diskHint = NSTextField(labelWithString: "外置、可移动且可写的整块磁盘")
+        diskHint.font = .systemFont(ofSize: 12)
+        diskHint.textColor = .secondaryLabelColor
+        let diskRow = makePreparationRow(
+            symbol: "externaldrive",
+            title: "目标 U 盘",
+            detail: diskHint,
+            controls: [diskPopup, refreshButton]
+        )
+
+        let firstSeparator = NSBox()
+        firstSeparator.boxType = .separator
+        let secondSeparator = NSBox()
+        secondSeparator.boxType = .separator
+
+        let stack = NSStackView(views: [header, firstSeparator, imageRow, secondSeparator, diskRow])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 10
+        stack.setCustomSpacing(12, after: header)
+        stack.setCustomSpacing(5, after: firstSeparator)
+        stack.setCustomSpacing(5, after: imageRow)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        panel.addSubview(stack)
+
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: 18),
+            stack.trailingAnchor.constraint(equalTo: panel.trailingAnchor, constant: -18),
+            stack.topAnchor.constraint(equalTo: panel.topAnchor, constant: 15),
+            stack.bottomAnchor.constraint(equalTo: panel.bottomAnchor, constant: -15),
+            firstSeparator.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            secondSeparator.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            imageRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            diskRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            imageRow.heightAnchor.constraint(equalToConstant: 46),
+            diskRow.heightAnchor.constraint(equalToConstant: 46),
+        ])
+        return panel
+    }
+
+    private func makePreparationRow(
+        symbol: String,
+        title: String,
+        detail: NSView,
+        controls: [NSView]
+    ) -> NSView {
+        let icon = NSImageView(
+            image: NSImage(systemSymbolName: symbol, accessibilityDescription: title)!)
+        icon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 18, weight: .regular)
+        icon.contentTintColor = .secondaryLabelColor
+        icon.widthAnchor.constraint(equalToConstant: 24).isActive = true
+
+        let titleLabel = NSTextField(labelWithString: title)
+        titleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+        let text = NSStackView(views: [titleLabel, detail])
+        text.orientation = .vertical
+        text.alignment = .leading
+        text.spacing = 3
+        text.setContentHuggingPriority(.required, for: .horizontal)
+
+        let spacer = NSView()
+        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        spacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        let row = NSStackView(views: [icon, text, spacer] + controls)
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 12
+        return row
+    }
+
     private func makeLogPanel() -> NSView {
-        let panel = GlassPanelView(material: .contentBackground, radius: 11)
+        let panel = GlassPanelView(material: .contentBackground, radius: 14)
+        activityIcon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 18, weight: .medium)
+        activityIcon.widthAnchor.constraint(equalToConstant: 24).isActive = true
+        activityTitleLabel.font = .systemFont(ofSize: 15, weight: .semibold)
+        activitySubtitleLabel.font = .systemFont(ofSize: 12)
+        activitySubtitleLabel.textColor = .secondaryLabelColor
+        activitySubtitleLabel.lineBreakMode = .byTruncatingTail
+
+        let activityText = NSStackView(views: [activityTitleLabel, activitySubtitleLabel])
+        activityText.orientation = .vertical
+        activityText.alignment = .leading
+        activityText.spacing = 2
+        let header = NSStackView(views: [activityIcon, activityText])
+        header.orientation = .horizontal
+        header.alignment = .centerY
+        header.spacing = 11
+
+        let separator = NSBox()
+        separator.boxType = .separator
         let scrollView = NSScrollView()
         scrollView.borderType = .noBorder
         scrollView.drawsBackground = false
         scrollView.hasVerticalScroller = true
         scrollView.autohidesScrollers = true
         scrollView.documentView = logTextView
-        scrollView.translatesAutoresizingMaskIntoConstraints = false
-        panel.addSubview(scrollView)
+        let stack = NSStackView(views: [header, separator, scrollView])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 10
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        panel.addSubview(stack)
 
         logTextView.minSize = NSSize(width: 0, height: 0)
         logTextView.maxSize = NSSize(
@@ -525,24 +595,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         logTextView.textContainer?.widthTracksTextView = true
 
         NSLayoutConstraint.activate([
-            panel.heightAnchor.constraint(equalToConstant: 148),
-            scrollView.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: 6),
-            scrollView.trailingAnchor.constraint(equalTo: panel.trailingAnchor, constant: -6),
-            scrollView.topAnchor.constraint(equalTo: panel.topAnchor, constant: 4),
-            scrollView.bottomAnchor.constraint(equalTo: panel.bottomAnchor, constant: -4),
+            panel.heightAnchor.constraint(equalToConstant: 176),
+            stack.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: 16),
+            stack.trailingAnchor.constraint(equalTo: panel.trailingAnchor, constant: -10),
+            stack.topAnchor.constraint(equalTo: panel.topAnchor, constant: 14),
+            stack.bottomAnchor.constraint(equalTo: panel.bottomAnchor, constant: -8),
+            header.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            separator.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -6),
+            scrollView.widthAnchor.constraint(equalTo: stack.widthAnchor),
         ])
         return panel
-    }
-
-    private func makeSection(title: String, content: NSView) -> NSView {
-        let label = NSTextField(labelWithString: title)
-        label.font = .systemFont(ofSize: 14, weight: .semibold)
-        let stack = NSStackView(views: [label, content])
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 8
-        content.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
-        return stack
     }
 
     @objc private func chooseImage() {
@@ -560,9 +622,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         imageURL = url
         writePhase = .idle
-        imageField.stringValue = url.path
+        imageField.stringValue = url.lastPathComponent
         imageField.toolTip = url.path
-        statusLabel.stringValue = "镜像已选择，请确认目标 U 盘"
+        statusLabel.stringValue = readinessStatus()
         updateWriteButton()
         updateProgressState()
     }
@@ -577,7 +639,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         diskPopup.addItem(withTitle: "正在扫描外置 U 盘…")
         diskPopup.isEnabled = false
         refreshButton.isEnabled = false
-        if !isWriting {
+        if !isWriting && writePhase == .idle {
             statusLabel.stringValue = "正在扫描外置 U 盘…"
         }
         updateWriteButton()
@@ -600,7 +662,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if devices.isEmpty {
             diskPopup.addItem(withTitle: "未发现可写的外置 U 盘")
             diskPopup.isEnabled = false
-            statusLabel.stringValue = imageURL == nil ? "请选择镜像并插入 U 盘" : "镜像已选择，请插入 U 盘"
         } else {
             devices.forEach { diskPopup.addItem(withTitle: $0.displayName) }
             diskPopup.isEnabled = true
@@ -609,7 +670,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 diskPopup.selectItem(at: index)
             }
             diskPopup.synchronizeTitleAndSelectedItem()
-            statusLabel.stringValue = imageURL == nil ? "请选择系统镜像" : "镜像和目标 U 盘已就绪"
+        }
+
+        if writePhase == .idle {
+            statusLabel.stringValue = readinessStatus()
+        } else if writePhase == .succeeded {
+            statusLabel.stringValue = "制作完成，U 盘已安全弹出"
         }
 
         refreshButton.isEnabled = !isWriting
@@ -797,7 +863,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         logTextView.string = ""
         appendLog("准备制作启动盘")
         appendLog("正在请求系统管理员授权；验证方式由 macOS 决定。")
-        copyLogButton.isEnabled = true
         updateProgressState()
     }
 
@@ -920,6 +985,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.appendLog(message)
             if state != "OUTPUT" {
                 self.statusLabel.stringValue = message
+                self.activitySubtitleLabel.stringValue = message
             }
         }
 
@@ -977,11 +1043,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             success: success
         )
         alert.addButton(withTitle: success ? "完成" : "返回检查")
-        alert.addButton(withTitle: "复制制作日志")
-        alert.beginSheetModal(for: window) { [weak self] response in
-            guard response == .alertSecondButtonReturn, let self else { return }
-            self.copyLogToPasteboard()
-        }
+        alert.beginSheetModal(for: window) { _ in }
     }
 
     private func resultIcon(success: Bool) -> NSImage? {
@@ -1036,20 +1098,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         logTextView.scrollToEndOfDocument(nil)
     }
 
-    @objc private func copyProductionLog() {
-        copyLogToPasteboard()
-    }
-
-    private func copyLogToPasteboard() {
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        let copied = pasteboard.setString(logTextView.string, forType: .string)
-        statusLabel.stringValue = copied ? "制作日志已复制到剪贴板" : "无法写入系统剪贴板"
-        if !copied {
-            NSSound.beep()
-        }
-    }
-
     private func authorizationError(_ status: OSStatus) -> String {
         let detail = SecCopyErrorMessageString(status, nil) as String? ?? "OSStatus \(status)"
         return "系统授权失败：\(detail)"
@@ -1057,6 +1105,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func updateWriteButton() {
         writeButton.isEnabled = imageURL != nil && selectedDevice != nil && !isWriting
+    }
+
+    private func readinessStatus() -> String {
+        if imageURL == nil && selectedDevice == nil {
+            return "请选择镜像并插入 U 盘"
+        }
+        if imageURL == nil {
+            return "请选择系统镜像"
+        }
+        if selectedDevice == nil {
+            return "镜像已选择，请插入 U 盘"
+        }
+        return "镜像和目标 U 盘已就绪"
     }
 
     private func updateProgressState() {
@@ -1071,6 +1132,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             imageStepSubtitle.stringValue = "镜像已写入"
             diskStepSubtitle.stringValue = "已安全弹出"
             writeStepSubtitle.stringValue = "制作完成"
+            configureStep(activityIcon, symbol: "checkmark.circle.fill", color: .systemGreen)
+            activityTitleLabel.stringValue = "制作完成"
+            activitySubtitleLabel.stringValue = "镜像已写入，U 盘已安全弹出"
         case .failed:
             configureStep(imageStepIcon, symbol: "doc.fill", color: .secondaryLabelColor)
             configureStep(diskStepIcon, symbol: "externaldrive.fill", color: .systemOrange)
@@ -1078,6 +1142,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             imageStepSubtitle.stringValue = "保留所选镜像"
             diskStepSubtitle.stringValue = "请检查设备"
             writeStepSubtitle.stringValue = "制作未完成"
+            configureStep(activityIcon, symbol: "xmark.octagon.fill", color: .systemRed)
+            activityTitleLabel.stringValue = "制作未完成"
+            activitySubtitleLabel.stringValue = statusLabel.stringValue
         case .writing:
             configureStep(imageStepIcon, symbol: "doc.fill", color: .controlAccentColor)
             configureStep(diskStepIcon, symbol: "externaldrive.fill", color: .controlAccentColor)
@@ -1085,6 +1152,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             imageStepSubtitle.stringValue = "使用所选镜像"
             diskStepSubtitle.stringValue = "目标已锁定"
             writeStepSubtitle.stringValue = "正在写入"
+            configureStep(activityIcon, symbol: "arrow.down.circle.fill", color: .controlAccentColor)
+            activityTitleLabel.stringValue = "正在制作启动盘"
+            activitySubtitleLabel.stringValue = statusLabel.stringValue
         case .idle:
             configureStep(
                 imageStepIcon,
@@ -1100,6 +1170,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             imageStepSubtitle.stringValue = hasImage ? "镜像已选择" : "选择系统镜像"
             diskStepSubtitle.stringValue = hasDisk ? "目标已就绪" : "选择外置 U 盘"
             writeStepSubtitle.stringValue = hasImage && hasDisk ? "可以开始制作" : "等待准备完成"
+            configureStep(
+                activityIcon,
+                symbol: hasImage && hasDisk ? "checkmark.circle" : "clock",
+                color: hasImage && hasDisk ? .controlAccentColor : .tertiaryLabelColor
+            )
+            activityTitleLabel.stringValue = hasImage && hasDisk ? "准备就绪" : "等待开始"
+            activitySubtitleLabel.stringValue = readinessStatus()
         }
     }
 

@@ -8,7 +8,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 - In-app production log for validation, unmount, raw write progress, synchronization, completion, and failures.
 - macOS system authorization flow, allowing the authentication method permitted by system policy.
-- Native completion sheet summarizing the image, target device, elapsed time, eject state, and copyable log.
+- Native completion sheet summarizing the image, target device, elapsed time, and eject state.
 
 ### Changed
 
