@@ -4,6 +4,29 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-08-14
+
+### Added
+
+- In-app production log for validation, unmount, raw write progress, synchronization, completion, and failures.
+- macOS system authorization flow, allowing the authentication method permitted by system policy.
+- Native completion sheet summarizing the image, target device, elapsed time, and eject state.
+- Reproducible Apple Silicon DMG packaging with a matching SHA-256 checksum.
+
+### Changed
+
+- Removed the Terminal and `sudo` handoff from the write workflow.
+- Prevented normal app termination while a privileged write is active, avoiding accidental pipe closure during destructive work.
+- Replaced mixed numbered/checkmark sidebar steps with semantic image, device, and write-state icons.
+- Removed the persistent warning card from the workspace; destructive guidance now appears only in the final confirmation sheet.
+- Made the main window resizable with bounded restoration, a fixed-width sidebar, responsive log space, and stable truncation for long image or device names.
+
+### Security
+
+- The app never receives or stores an administrator password.
+- The privileged task revalidates the image size plus whole/external/removable/writable disk identity and exact capacity after authorization.
+- A persistent privileged helper remains deferred until Developer ID signing can authenticate its XPC client.
+
 ## [1.1.0] - 2026-08-14
 
 ### Added
@@ -26,5 +49,6 @@ All notable changes to this project are documented here. The format follows [Kee
 - Disk identity and exact size are checked again before unmounting or writing.
 - Administrator credentials remain exclusively in the system Terminal and `sudo` flow.
 
-[Unreleased]: https://github.com/fanny7d/USB-Bootable-Drive-Tool/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/fanny7d/USB-Bootable-Drive-Tool/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/fanny7d/USB-Bootable-Drive-Tool/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/fanny7d/USB-Bootable-Drive-Tool/releases/tag/v1.1.0

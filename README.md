@@ -11,17 +11,22 @@ A native macOS AppKit utility for writing ISO and IMG images to removable USB dr
 
 ![Application screenshot](docs/app-screenshot.png)
 
+The responsive workspace keeps preparation choices together, gives live activity its own flexible panel, and truncates long image or device names without resizing the window.
+
 > [!CAUTION]
 > Writing an image permanently overwrites the selected USB drive. Back up important data and verify the device name, capacity, and identifier before confirming.
 
 ## Features
 
 - Native AppKit interface with macOS system materials.
+- Resizable utility window with bounded sizing, responsive log space, and stable truncation for long image or device names.
 - ISO and IMG image selection.
 - Automatic discovery and hot-plug refresh for external USB media.
 - Shows only whole, external, removable, writable physical disks.
 - Revalidates disk identity and exact byte capacity before destructive work.
-- Keeps administrator password entry in Terminal and system `sudo`.
+- Uses the macOS system authorization UI instead of opening Terminal; macOS decides whether password, Touch ID, or Apple Watch is available.
+- Shows write state, `dd` progress, and errors in the app's **制作日志** panel.
+- Presents a native result sheet with image, target, elapsed time, and eject state.
 - Writes through `/dev/rdiskN`, then runs `sync` and safely ejects the drive.
 - Custom Dock/Finder icon, standard menus, and accessible UI labels.
 - Reproducible command-line build with no third-party runtime dependencies.
@@ -29,9 +34,20 @@ A native macOS AppKit utility for writing ISO and IMG images to removable USB dr
 ## Requirements
 
 - macOS 13 Ventura or newer.
+- An Apple Silicon Mac (arm64) for the downloadable DMG.
 - Xcode Command Line Tools (`xcode-select --install`).
 - A removable USB drive.
 - A bootable/hybrid ISO or IMG compatible with the target computer.
+
+## Install
+
+Download the latest `macOS-arm64.dmg` and matching `.sha256` file from [GitHub Releases](https://github.com/fanny7d/USB-Bootable-Drive-Tool/releases/latest), then verify them in the same directory:
+
+```bash
+shasum -a 256 -c USB-Bootable-Drive-Tool-*-macOS-arm64.dmg.sha256
+```
+
+The downloadable build is ad-hoc signed and is not Apple-notarized. See [Distribution note](#distribution-note) before launching it.
 
 ## Build and run
 
@@ -55,13 +71,21 @@ Available development modes:
 ./script/build_and_run.sh --verify
 ```
 
+Create the same Apple Silicon DMG and checksum used for releases:
+
+```bash
+./script/package_dmg.sh
+```
+
+Artifacts are written to `dist/`. The packaging script rejects non-arm64 binaries and verifies the app signature and disk image before returning success.
+
 ## Usage
 
 1. Insert the removable USB drive. The app refreshes automatically.
 2. Select an `.iso` or `.img` system image.
 3. Confirm the exact target name, capacity, identifier, and protocol.
 4. Click **制作启动盘** and review the destructive confirmation.
-5. Enter the macOS login password in the Terminal window opened by the app.
+5. Complete the macOS system authorization request. The app never receives or stores the credential.
 6. Keep the drive connected until writing, synchronization, and eject complete.
 
 ## Safety model
@@ -69,9 +93,9 @@ Available development modes:
 The app deliberately maintains two independent validation layers:
 
 - The GUI filters candidates using `diskutil` plist data.
-- The Terminal job re-reads the target immediately before unmounting and writing.
+- The authorized task re-reads the target and image size immediately before unmounting and writing.
 
-The GUI never reads or saves an administrator password. See [Architecture](docs/ARCHITECTURE.md) for the full write boundary and safety invariants.
+The app never reads or saves an administrator password, and task output returns to the in-app log through a controlled pipe. See [Architecture](docs/ARCHITECTURE.md) for the full write boundary and safety invariants.
 
 ## Testing
 
@@ -99,7 +123,7 @@ Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) before openin
 
 ## Distribution note
 
-Local builds are ad-hoc signed for development. Public binary distribution requires an Apple Developer ID signature and notarization. Building from source does not require a paid Apple developer account.
+Local and current downloadable builds are ad-hoc signed. They are not Apple-notarized because this project does not yet have a configured Apple Developer ID certificate. macOS Gatekeeper may therefore require an explicit user approval. Building from source does not require a paid Apple developer account.
 
 ## License
 

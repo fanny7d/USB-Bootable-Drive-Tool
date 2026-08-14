@@ -9,6 +9,7 @@ ICON_FILE="$APP_BUNDLE/Contents/Resources/AppIcon.icns"
 zsh -n "$ROOT_DIR/build.command"
 zsh -n "$ROOT_DIR/script/build_and_run.sh"
 zsh -n "$ROOT_DIR/script/generate_app_icon.sh"
+zsh -n "$ROOT_DIR/script/package_dmg.sh"
 
 if /usr/bin/xcrun --find swift-format >/dev/null 2>&1; then
   /usr/bin/xcrun swift-format lint --strict "$ROOT_DIR/Sources/USBBootableDriveTool/main.swift"
@@ -19,7 +20,11 @@ fi
   -parse-as-library \
   -framework AppKit \
   -framework Foundation \
+  -framework Security \
   "$ROOT_DIR/Sources/USBBootableDriveTool/main.swift"
+
+! /usr/bin/grep -q 'NSWorkspace.shared.open(script)' "$ROOT_DIR/Sources/USBBootableDriveTool/main.swift"
+! /usr/bin/grep -q '/usr/bin/sudo' "$ROOT_DIR/Sources/USBBootableDriveTool/main.swift"
 
 "$ROOT_DIR/script/build_and_run.sh" --build-only
 /usr/bin/plutil -lint "$INFO_PLIST"
