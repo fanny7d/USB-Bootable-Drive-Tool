@@ -1,0 +1,61 @@
+name: Bug report
+description: Report a reproducible problem without exposing sensitive data.
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve the project. Do not include passwords, tokens, private paths, or full device serial numbers. Use GitHub private vulnerability reporting for disk-safety or privilege-boundary issues.
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+      placeholder: macOS 15.6
+    validations:
+      required: true
+  - type: input
+    id: app-version
+    attributes:
+      label: App version or commit
+      placeholder: 1.1.0 or commit SHA
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Problem
+      description: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      placeholder: |
+        1. Inserted a disposable USB drive
+        2. Opened the app
+        3. Clicked Refresh
+    validations:
+      required: true
+  - type: textarea
+    id: device
+    attributes:
+      label: Redacted device information
+      description: Include name, capacity, protocol, removable/writable state, and disk identifier. Remove serial numbers.
+      render: shell
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Include only the smallest redacted excerpt.
+      render: shell
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety confirmation
+      options:
+        - label: I did not use a production disk or media containing important data.
+          required: true
+        - label: I removed passwords, tokens, private paths, and full serial numbers.
+          required: true

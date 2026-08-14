@@ -1,0 +1,21 @@
+# macOS
+.DS_Store
+._*
+
+# Build products
+*.app/
+*.dSYM/
+*.dmg
+*.zip
+.build/
+DerivedData/
+
+# Xcode user state
+xcuserdata/
+*.xcuserstate
+
+# Local design and QA working files
+design-qa.md
+design-qa-comparison.png
+design-reference-option-2.png
+implementation-option-2.jpeg

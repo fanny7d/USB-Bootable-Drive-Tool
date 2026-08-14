@@ -1,0 +1,33 @@
+name: macOS CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-validate:
+    runs-on: macos-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Show toolchain
+        run: |
+          sw_vers
+          swift --version
+          xcode-select -p
+
+      - name: Run non-destructive checks
+        run: ./script/test.sh
