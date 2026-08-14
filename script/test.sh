@@ -19,7 +19,11 @@ fi
   -parse-as-library \
   -framework AppKit \
   -framework Foundation \
+  -framework Security \
   "$ROOT_DIR/Sources/USBBootableDriveTool/main.swift"
+
+! /usr/bin/grep -q 'NSWorkspace.shared.open(script)' "$ROOT_DIR/Sources/USBBootableDriveTool/main.swift"
+! /usr/bin/grep -q '/usr/bin/sudo' "$ROOT_DIR/Sources/USBBootableDriveTool/main.swift"
 
 "$ROOT_DIR/script/build_and_run.sh" --build-only
 /usr/bin/plutil -lint "$INFO_PLIST"

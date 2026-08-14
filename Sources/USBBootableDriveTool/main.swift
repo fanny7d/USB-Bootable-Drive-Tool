@@ -4,7 +4,20 @@
 import AppKit
 import Darwin
 import Foundation
+import Security
 import UniformTypeIdentifiers
+
+// Swift hides this legacy Authorization Services entry point even though macOS still exports it.
+// It is used as a certificate-free bridge until the project can ship a Developer ID-authenticated
+// SMAppService helper. The system owns the authorization UI; the app never receives credentials.
+@_silgen_name("AuthorizationExecuteWithPrivileges")
+private func executeWithPrivileges(
+    _ authorization: AuthorizationRef,
+    _ pathToTool: UnsafePointer<CChar>,
+    _ options: AuthorizationFlags,
+    _ arguments: UnsafePointer<UnsafeMutablePointer<CChar>>,
+    _ communicationsPipe: UnsafeMutablePointer<UnsafeMutablePointer<FILE>?>?
+) -> OSStatus
 
 struct USBDevice: Equatable {
     let identifier: String
@@ -18,6 +31,19 @@ struct USBDevice: Equatable {
     var displayName: String {
         "\(name) — \(ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .decimal)) (\(identifier), \(protocolName))"
     }
+}
+
+struct WriteJobContext {
+    let imageName: String
+    let disk: USBDevice
+    let startedAt: Date
+}
+
+enum WritePhase {
+    case idle
+    case writing
+    case succeeded
+    case failed
 }
 
 final class GlassPanelView: NSVisualEffectView {
@@ -43,9 +69,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let diskPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let chooseButton = NSButton(title: "选择镜像…", target: nil, action: nil)
     private let refreshButton = NSButton(title: "刷新 U 盘", target: nil, action: nil)
+    private let copyLogButton = NSButton(title: "复制日志", target: nil, action: nil)
     private let writeButton = NSButton(title: "制作启动盘", target: nil, action: nil)
     private let statusLabel = NSTextField(labelWithString: "请选择镜像并插入 U 盘")
     private let spinner = NSProgressIndicator()
+    private let logTextView = NSTextView()
     private let imageStepIcon = NSImageView()
     private let diskStepIcon = NSImageView()
     private let writeStepIcon = NSImageView()
@@ -55,11 +83,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var imageURL: URL?
     private var devices: [USBDevice] = []
-    private var statusFile: URL?
-    private var monitorTimer: Timer?
+    private var isWriting = false
+    private var writePhase: WritePhase = .idle
+    private var activeJob: WriteJobContext?
     private var diskScanGeneration = 0
     private var workspaceObserverTokens: [NSObjectProtocol] = []
     private var pendingDiskRefresh: DispatchWorkItem?
+    private let writerQueue = DispatchQueue(label: "cn.fanny7d.usb-maker.writer", qos: .userInitiated)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         installApplicationIcon()
@@ -73,15 +103,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard monitorTimer != nil else { return .terminateNow }
+        guard isWriting else { return .terminateNow }
 
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = "启动盘仍在制作"
-        alert.informativeText = "退出只会关闭进度监控，Terminal 中的写入任务仍会继续。建议等待制作完成。"
+        alert.informativeText = "为避免中断写入并损坏 U 盘，制作完成前不能退出应用。"
         alert.addButton(withTitle: "继续等待")
-        alert.addButton(withTitle: "仍要退出")
-        return alert.runModal() == .alertSecondButtonReturn ? .terminateNow : .terminateCancel
+        alert.runModal()
+        return .terminateCancel
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -155,7 +185,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func buildUI() {
         window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 920, height: 600),
+            contentRect: NSRect(x: 0, y: 0, width: 960, height: 660),
             styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
@@ -166,10 +196,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.isMovableByWindowBackground = true
         window.isOpaque = false
         window.backgroundColor = .clear
-        window.minSize = NSSize(width: 820, height: 540)
+        window.minSize = NSSize(width: 860, height: 620)
         window.isReleasedWhenClosed = false
         window.tabbingMode = .disallowed
-        window.setFrameAutosaveName("USBMakerMainWindow")
+        window.setFrameAutosaveName("USBMakerMainWindowV2")
         window.center()
 
         imageField.lineBreakMode = .byTruncatingMiddle
@@ -186,6 +216,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         refreshButton.imagePosition = .imageLeading
         refreshButton.bezelStyle = .push
         refreshButton.controlSize = .large
+        copyLogButton.target = self
+        copyLogButton.action = #selector(copyProductionLog)
+        copyLogButton.bezelStyle = .push
+        copyLogButton.controlSize = .large
+        copyLogButton.isEnabled = false
         writeButton.target = self
         writeButton.action = #selector(startWriting)
         writeButton.bezelStyle = .rounded
@@ -200,6 +235,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusLabel.textColor = .secondaryLabelColor
         statusLabel.font = .systemFont(ofSize: 13)
         statusLabel.lineBreakMode = .byTruncatingTail
+
+        logTextView.isEditable = false
+        logTextView.isSelectable = true
+        logTextView.drawsBackground = false
+        logTextView.font = .monospacedSystemFont(ofSize: 11.5, weight: .regular)
+        logTextView.textColor = .secondaryLabelColor
+        logTextView.textContainerInset = NSSize(width: 10, height: 8)
+        logTextView.string = "等待开始制作…"
+        logTextView.setAccessibilityLabel("制作日志")
 
         guard let contentView = window.contentView else { return }
         let background = NSVisualEffectView()
@@ -263,11 +307,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func scheduleDiskRefresh(after delay: TimeInterval = 0.6) {
-        guard monitorTimer == nil else { return }
+        guard !isWriting else { return }
         pendingDiskRefresh?.cancel()
 
         let workItem = DispatchWorkItem { [weak self] in
-            guard let self, self.monitorTimer == nil else { return }
+            guard let self, !self.isWriting else { return }
             self.refreshDisks()
         }
         pendingDiskRefresh = workItem
@@ -301,9 +345,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         appSubtitle.alignment = .center
 
         let steps = NSStackView(views: [
-            makeStep(icon: imageStepIcon, title: "镜像", subtitle: imageStepSubtitle),
-            makeStep(icon: diskStepIcon, title: "U 盘", subtitle: diskStepSubtitle),
-            makeStep(icon: writeStepIcon, title: "写入", subtitle: writeStepSubtitle),
+            makeStep(icon: imageStepIcon, title: "系统镜像", subtitle: imageStepSubtitle),
+            makeStep(icon: diskStepIcon, title: "目标设备", subtitle: diskStepSubtitle),
+            makeStep(icon: writeStepIcon, title: "制作状态", subtitle: writeStepSubtitle),
         ])
         steps.orientation = .vertical
         steps.alignment = .leading
@@ -410,63 +454,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         refreshButton.widthAnchor.constraint(equalToConstant: 108).isActive = true
         diskWell.widthAnchor.constraint(equalTo: diskRow.widthAnchor, constant: -118).isActive = true
 
-        let warningPanel = GlassPanelView(material: .underPageBackground, radius: 11)
-        let warningIcon = NSImageView(
-            image: NSImage(systemSymbolName: "exclamationmark.triangle.fill", accessibilityDescription: "警告")!)
-        warningIcon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 22, weight: .medium)
-        warningIcon.contentTintColor = .systemOrange
-        let warningTitle = NSTextField(labelWithString: "继续前会再次确认并清空目标磁盘")
-        warningTitle.font = .systemFont(ofSize: 14, weight: .semibold)
-        let warningText = NSTextField(labelWithString: "所有数据将被永久删除，请提前备份重要文件。")
-        warningText.font = .systemFont(ofSize: 12)
-        warningText.textColor = .secondaryLabelColor
-        let warningLabels = NSStackView(views: [warningTitle, warningText])
-        warningLabels.orientation = .vertical
-        warningLabels.alignment = .leading
-        warningLabels.spacing = 3
-        let warningContent = NSStackView(views: [warningIcon, warningLabels])
-        warningContent.orientation = .horizontal
-        warningContent.alignment = .centerY
-        warningContent.spacing = 13
-        warningContent.translatesAutoresizingMaskIntoConstraints = false
-        warningPanel.addSubview(warningContent)
-        NSLayoutConstraint.activate([
-            warningContent.leadingAnchor.constraint(equalTo: warningPanel.leadingAnchor, constant: 16),
-            warningContent.trailingAnchor.constraint(lessThanOrEqualTo: warningPanel.trailingAnchor, constant: -16),
-            warningContent.centerYAnchor.constraint(equalTo: warningPanel.centerYAnchor),
-            warningPanel.heightAnchor.constraint(equalToConstant: 72),
-        ])
-
         let statusRow = NSStackView(views: [spinner, statusLabel])
         statusRow.orientation = .horizontal
         statusRow.alignment = .centerY
         statusRow.spacing = 8
 
-        let footer = NSStackView(views: [statusRow, writeButton])
+        let footer = NSStackView(views: [statusRow, copyLogButton, writeButton])
         footer.orientation = .horizontal
         footer.alignment = .centerY
         footer.spacing = 16
         statusRow.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        copyLogButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 92).isActive = true
         writeButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 126).isActive = true
 
         let imageSection = makeSection(title: "选择系统镜像", content: imageWell)
         let diskSection = makeSection(title: "选择目标 U 盘", content: diskRow)
+        let logSection = makeSection(title: "制作日志", content: makeLogPanel())
         let content = NSStackView(views: [
             title,
             subtitle,
             imageSection,
             diskSection,
-            warningPanel,
+            logSection,
             footer,
         ])
         content.orientation = .vertical
         content.alignment = .leading
         content.spacing = 18
         content.setCustomSpacing(7, after: title)
-        content.setCustomSpacing(46, after: subtitle)
-        content.setCustomSpacing(25, after: imageSection)
-        content.setCustomSpacing(62, after: diskSection)
-        content.setCustomSpacing(20, after: warningPanel)
+        content.setCustomSpacing(26, after: subtitle)
+        content.setCustomSpacing(18, after: imageSection)
+        content.setCustomSpacing(22, after: diskSection)
+        content.setCustomSpacing(14, after: logSection)
         content.translatesAutoresizingMaskIntoConstraints = false
         workspace.addSubview(content)
 
@@ -478,10 +497,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             subtitle.widthAnchor.constraint(equalTo: content.widthAnchor),
             imageWell.widthAnchor.constraint(equalTo: content.widthAnchor),
             diskRow.widthAnchor.constraint(equalTo: content.widthAnchor),
-            warningPanel.widthAnchor.constraint(equalTo: content.widthAnchor),
+            logSection.widthAnchor.constraint(equalTo: content.widthAnchor),
             footer.widthAnchor.constraint(equalTo: content.widthAnchor),
         ])
         return workspace
+    }
+
+    private func makeLogPanel() -> NSView {
+        let panel = GlassPanelView(material: .contentBackground, radius: 11)
+        let scrollView = NSScrollView()
+        scrollView.borderType = .noBorder
+        scrollView.drawsBackground = false
+        scrollView.hasVerticalScroller = true
+        scrollView.autohidesScrollers = true
+        scrollView.documentView = logTextView
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        panel.addSubview(scrollView)
+
+        logTextView.minSize = NSSize(width: 0, height: 0)
+        logTextView.maxSize = NSSize(
+            width: CGFloat.greatestFiniteMagnitude,
+            height: CGFloat.greatestFiniteMagnitude
+        )
+        logTextView.isVerticallyResizable = true
+        logTextView.isHorizontallyResizable = false
+        logTextView.autoresizingMask = [.width]
+        logTextView.textContainer?.widthTracksTextView = true
+
+        NSLayoutConstraint.activate([
+            panel.heightAnchor.constraint(equalToConstant: 148),
+            scrollView.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: 6),
+            scrollView.trailingAnchor.constraint(equalTo: panel.trailingAnchor, constant: -6),
+            scrollView.topAnchor.constraint(equalTo: panel.topAnchor, constant: 4),
+            scrollView.bottomAnchor.constraint(equalTo: panel.bottomAnchor, constant: -4),
+        ])
+        return panel
     }
 
     private func makeSection(title: String, content: NSView) -> NSView {
@@ -509,6 +559,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         imageURL = url
+        writePhase = .idle
         imageField.stringValue = url.path
         imageField.toolTip = url.path
         statusLabel.stringValue = "镜像已选择，请确认目标 U 盘"
@@ -526,7 +577,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         diskPopup.addItem(withTitle: "正在扫描外置 U 盘…")
         diskPopup.isEnabled = false
         refreshButton.isEnabled = false
-        if monitorTimer == nil {
+        if !isWriting {
             statusLabel.stringValue = "正在扫描外置 U 盘…"
         }
         updateWriteButton()
@@ -561,7 +612,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             statusLabel.stringValue = imageURL == nil ? "请选择系统镜像" : "镜像和目标 U 盘已就绪"
         }
 
-        refreshButton.isEnabled = monitorTimer == nil
+        refreshButton.isEnabled = !isWriting
         updateWriteButton()
         updateProgressState()
     }
@@ -643,6 +694,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func startWriting() {
         guard let imageURL, let disk = selectedDevice else { return }
 
+        guard let imageSize = try? imageURL.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+            imageSize > 0
+        else {
+            showAlert("无法读取镜像", "请确认镜像文件仍然存在且可以读取。")
+            return
+        }
+
         // Re-read immediately before asking the user, so a replugged disk cannot inherit stale UI state.
         let current = discoverUSBDevices().first { $0.identifier == disk.identifier }
         guard current == disk else {
@@ -658,75 +716,68 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.addButton(withTitle: "取消")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
 
-        do {
-            let jobDirectory = FileManager.default.temporaryDirectory
-                .appendingPathComponent("USBMaker-\(UUID().uuidString)", isDirectory: true)
-            try FileManager.default.createDirectory(at: jobDirectory, withIntermediateDirectories: true)
-            let script = jobDirectory.appendingPathComponent("write-usb.command")
-            let status = jobDirectory.appendingPathComponent("status.txt")
-            try makeScript(image: imageURL, disk: disk, status: status).write(
-                to: script, atomically: true, encoding: .utf8)
-            try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: script.path)
-            statusFile = status
-
-            NSWorkspace.shared.open(script)
-            beginMonitoring()
-        } catch {
-            showAlert("无法启动写入", error.localizedDescription)
+        activeJob = WriteJobContext(imageName: imageURL.lastPathComponent, disk: disk, startedAt: Date())
+        beginWriting()
+        writerQueue.async { [weak self] in
+            self?.performAuthorizedWrite(image: imageURL, imageSize: UInt64(imageSize), disk: disk)
         }
     }
 
-    private func makeScript(image: URL, disk: USBDevice, status: URL) -> String {
+    private func makePrivilegedScript(image: URL, imageSize: UInt64, disk: USBDevice) -> String {
         let device = shellQuote(disk.path)
         let rawDevice = shellQuote(disk.rawPath)
         let imagePath = shellQuote(image.path)
-        let statusPath = shellQuote(status.path)
         let expectedSize = disk.size
 
         return """
-            #!/bin/zsh
             set -euo pipefail
-            STATUS=\(statusPath)
+            exec 2>&1
             DEVICE=\(device)
             RAW_DEVICE=\(rawDevice)
             IMAGE=\(imagePath)
-            EXPECTED_SIZE=\(expectedSize)
+            EXPECTED_DISK_SIZE=\(expectedSize)
+            EXPECTED_IMAGE_SIZE=\(imageSize)
 
-            update_status() { print -r -- "$1" >| "$STATUS" }
+            emit() { print -r -- "$1" }
+            info_file=$(/usr/bin/mktemp /private/tmp/usb-maker-info.XXXXXX)
+            cleanup() { /bin/rm -f "$info_file" }
             failed() {
               code=$?
-              update_status "FAILED|写入失败（退出码 $code），请查看 Terminal 中的错误"
-              print '\n写入失败，请不要将此 U 盘用于安装。'
+              emit "FAILED|写入失败（退出码 $code），请勿使用这个 U 盘启动"
               exit $code
             }
+            trap cleanup EXIT
             trap failed ZERR INT TERM
 
-            update_status 'CHECKING|正在重新验证目标磁盘…'
-            info_file="${STATUS:h}/disk-info.plist"
+            emit 'CHECKING|正在重新验证镜像和目标磁盘…'
+            [[ "$DEVICE" == /dev/disk<-> ]]
+            [[ "$RAW_DEVICE" == /dev/rdisk<-> ]]
+            [[ -f "$IMAGE" && -r "$IMAGE" ]]
+            [[ "$(/usr/bin/stat -f %z "$IMAGE")" == "$EXPECTED_IMAGE_SIZE" ]]
             /usr/sbin/diskutil info -plist "$DEVICE" >| "$info_file"
             plist_bool() { /usr/bin/plutil -extract "$1" raw -o - "$info_file" 2>/dev/null || true }
             [[ "$(plist_bool WholeDisk)" == 'true' || "$(plist_bool Whole)" == 'true' ]]
             [[ "$(plist_bool Internal)" == 'false' ]]
             [[ "$(plist_bool RemovableMedia)" == 'true' || "$(plist_bool Removable)" == 'true' ]]
             [[ "$(plist_bool WritableMedia)" == 'true' || "$(plist_bool Writable)" == 'true' ]]
-            [[ "$(/usr/bin/plutil -extract TotalSize raw -o - "$info_file")" == "$EXPECTED_SIZE" ]]
+            [[ "$(/usr/bin/plutil -extract TotalSize raw -o - "$info_file")" == "$EXPECTED_DISK_SIZE" ]]
 
-            update_status 'UNMOUNTING|正在卸载 U 盘…'
+            emit 'UNMOUNTING|正在卸载 U 盘…'
             /usr/sbin/diskutil unmountDisk "$DEVICE"
 
-            update_status 'AUTH|请在 Terminal 中输入 Mac 登录密码（输入时不显示字符）'
-            print '即将写入：' "$DEVICE"
-            print '请输入 Mac 登录密码（输入时不会显示字符）：'
-            /usr/bin/sudo -v
+            emit 'WRITING|正在写入镜像，请勿拔出 U 盘…'
+            /bin/dd if="$IMAGE" of="$RAW_DEVICE" bs=4m &
+            dd_pid=$!
+            while /bin/kill -0 "$dd_pid" 2>/dev/null; do
+              /bin/sleep 1
+              /bin/kill -INFO "$dd_pid" 2>/dev/null || true
+            done
+            wait "$dd_pid"
 
-            update_status 'WRITING|正在写入镜像，请勿拔出 U 盘…'
-            /usr/bin/sudo /bin/dd if="$IMAGE" of="$RAW_DEVICE" bs=4m
-
-            update_status 'SYNCING|正在同步数据…'
+            emit 'SYNCING|正在同步数据…'
             /bin/sync
             /usr/sbin/diskutil eject "$DEVICE"
-            update_status 'COMPLETE|制作完成，U 盘已安全弹出'
-            print '\n制作完成，U 盘已安全弹出，可以拔出。'
+            emit 'COMPLETE|制作完成，U 盘已安全弹出'
             """
     }
 
@@ -734,82 +785,327 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
-    private func beginMonitoring() {
+    private func beginWriting() {
+        isWriting = true
+        writePhase = .writing
         spinner.startAnimation(nil)
         chooseButton.isEnabled = false
         refreshButton.isEnabled = false
         diskPopup.isEnabled = false
         writeButton.isEnabled = false
-        statusLabel.stringValue = "Terminal 已打开，等待任务启动…"
+        statusLabel.stringValue = "正在请求 macOS 系统授权…"
+        logTextView.string = ""
+        appendLog("准备制作启动盘")
+        appendLog("正在请求系统管理员授权；验证方式由 macOS 决定。")
+        copyLogButton.isEnabled = true
         updateProgressState()
-
-        monitorTimer?.invalidate()
-        monitorTimer = Timer.scheduledTimer(withTimeInterval: 0.7, repeats: true) { [weak self] _ in
-            self?.readStatus()
-        }
     }
 
-    private func readStatus() {
-        guard let statusFile,
-            let text = try? String(contentsOf: statusFile, encoding: .utf8)
-                .trimmingCharacters(in: .whitespacesAndNewlines),
-            !text.isEmpty
-        else { return }
+    private func performAuthorizedWrite(image: URL, imageSize: UInt64, disk: USBDevice) {
+        var authorization: AuthorizationRef?
+        let createStatus = AuthorizationCreate(nil, nil, [], &authorization)
+        guard createStatus == errAuthorizationSuccess, let authorization else {
+            finishWriting(success: false, message: authorizationError(createStatus))
+            return
+        }
+        defer { AuthorizationFree(authorization, []) }
 
-        let fields = text.split(separator: "|", maxSplits: 1).map(String.init)
-        let state = fields[0]
-        statusLabel.stringValue = fields.count > 1 ? fields[1] : state
+        let flags: AuthorizationFlags = [.interactionAllowed, .extendRights, .preAuthorize]
+        let authorizationStatus = copyWriteAuthorization(authorization, disk: disk, flags: flags)
+        guard authorizationStatus == errAuthorizationSuccess else {
+            let cancelled = authorizationStatus == errAuthorizationCanceled
+            finishWriting(
+                success: false,
+                message: cancelled ? "已取消系统授权，未写入 U 盘" : authorizationError(authorizationStatus),
+                showFailureAlert: !cancelled
+            )
+            return
+        }
 
-        if state == "COMPLETE" || state == "FAILED" {
-            monitorTimer?.invalidate()
-            monitorTimer = nil
-            spinner.stopAnimation(nil)
-            chooseButton.isEnabled = true
-            refreshButton.isEnabled = true
-            refreshDisks()
-            updateProgressState()
+        let script = makePrivilegedScript(image: image, imageSize: imageSize, disk: disk)
+        let rawArguments = ["-c", script]
+        var arguments: [UnsafeMutablePointer<CChar>?] = rawArguments.map { strdup($0) }
+        arguments.append(nil)
+        defer { arguments.compactMap { $0 }.forEach { free($0) } }
 
-            if state == "COMPLETE" {
-                showAlert("启动盘制作完成", "U 盘已经安全弹出，可以用于启动和安装系统。", style: .informational)
-            } else {
-                showAlert("启动盘制作失败", fields.count > 1 ? fields[1] : "请查看 Terminal 中的错误。")
+        var communicationsPipe: UnsafeMutablePointer<FILE>?
+        let executionStatus = "/bin/zsh".withCString { executable in
+            arguments.withUnsafeMutableBufferPointer { buffer in
+                let argumentPointer = UnsafeRawPointer(buffer.baseAddress!)
+                    .assumingMemoryBound(to: UnsafeMutablePointer<CChar>.self)
+                return executeWithPrivileges(
+                    authorization,
+                    executable,
+                    [],
+                    argumentPointer,
+                    &communicationsPipe
+                )
+            }
+        }
+        guard executionStatus == errAuthorizationSuccess, let communicationsPipe else {
+            finishWriting(success: false, message: authorizationError(executionStatus))
+            return
+        }
+
+        var terminalState: (success: Bool, message: String)?
+        var buffer = [CChar](repeating: 0, count: 4096)
+        while fgets(&buffer, Int32(buffer.count), communicationsPipe) != nil {
+            let line = String(cString: buffer).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !line.isEmpty else { continue }
+            if let result = handleWriterOutput(line) {
+                terminalState = result
+            }
+        }
+        fclose(communicationsPipe)
+
+        guard let terminalState else {
+            finishWriting(success: false, message: "特权写入进程意外结束，未收到完成状态")
+            return
+        }
+        finishWriting(success: terminalState.success, message: terminalState.message)
+    }
+
+    private func copyWriteAuthorization(
+        _ authorization: AuthorizationRef,
+        disk: USBDevice,
+        flags: AuthorizationFlags
+    ) -> OSStatus {
+        let toolPath = "/bin/zsh"
+        let prompt = "USB 启动盘工具需要授权清空并写入 \(disk.displayName)。"
+
+        return kAuthorizationRightExecute.withCString { rightName in
+            toolPath.withCString { toolPointer in
+                prompt.withCString { promptPointer in
+                    kAuthorizationEnvironmentPrompt.withCString { promptName in
+                        var right = AuthorizationItem(
+                            name: rightName,
+                            valueLength: strlen(toolPointer),
+                            value: UnsafeMutableRawPointer(mutating: toolPointer),
+                            flags: 0
+                        )
+                        var promptItem = AuthorizationItem(
+                            name: promptName,
+                            valueLength: strlen(promptPointer),
+                            value: UnsafeMutableRawPointer(mutating: promptPointer),
+                            flags: 0
+                        )
+                        return withUnsafeMutablePointer(to: &right) { rightPointer in
+                            withUnsafeMutablePointer(to: &promptItem) { promptItemPointer in
+                                var rights = AuthorizationRights(count: 1, items: rightPointer)
+                                var environment = AuthorizationEnvironment(count: 1, items: promptItemPointer)
+                                return AuthorizationCopyRights(
+                                    authorization,
+                                    &rights,
+                                    &environment,
+                                    flags,
+                                    nil
+                                )
+                            }
+                        }
+                    }
+                }
             }
         }
     }
 
+    private func handleWriterOutput(_ line: String) -> (success: Bool, message: String)? {
+        let fields = line.split(separator: "|", maxSplits: 1).map(String.init)
+        let recognizedStates = Set(["CHECKING", "UNMOUNTING", "WRITING", "SYNCING", "COMPLETE", "FAILED"])
+        let hasRecognizedState = fields.count > 1 && recognizedStates.contains(fields[0])
+        let state = hasRecognizedState ? fields[0] : "OUTPUT"
+        let message = hasRecognizedState ? fields[1] : line
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.appendLog(message)
+            if state != "OUTPUT" {
+                self.statusLabel.stringValue = message
+            }
+        }
+
+        switch state {
+        case "COMPLETE":
+            return (true, message)
+        case "FAILED":
+            return (false, message)
+        default:
+            return nil
+        }
+    }
+
+    private func finishWriting(success: Bool, message: String, showFailureAlert: Bool = true) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            let completedJob = self.activeJob
+            self.activeJob = nil
+            self.isWriting = false
+            self.writePhase = success ? .succeeded : (showFailureAlert ? .failed : .idle)
+            self.spinner.stopAnimation(nil)
+            self.chooseButton.isEnabled = true
+            self.refreshButton.isEnabled = true
+            self.statusLabel.stringValue = message
+            if !self.logTextView.string.hasSuffix(message) {
+                self.appendLog(message)
+            }
+            self.updateProgressState()
+            self.refreshDisks()
+
+            if success, let completedJob {
+                self.presentWriteResult(success: true, message: message, job: completedJob)
+            } else if showFailureAlert, let completedJob {
+                self.presentWriteResult(success: false, message: message, job: completedJob)
+            }
+        }
+    }
+
+    private func presentWriteResult(success: Bool, message: String, job: WriteJobContext) {
+        let elapsed = max(0, Int(Date().timeIntervalSince(job.startedAt)))
+        let duration = elapsed >= 60 ? "\(elapsed / 60) 分 \(elapsed % 60) 秒" : "\(elapsed) 秒"
+
+        let alert = NSAlert()
+        alert.alertStyle = success ? .informational : .critical
+        alert.messageText = success ? "启动盘制作完成" : "启动盘制作未完成"
+        alert.informativeText = success ? "镜像已经写入并完成同步，目标 U 盘已安全弹出，可以拔出。" : message
+        alert.icon = resultIcon(success: success)
+        alert.accessoryView = resultDetailsView(
+            rows: [
+                ("镜像", job.imageName),
+                ("目标", job.disk.displayName),
+                ("耗时", duration),
+                ("结果", success ? "已安全弹出" : "未完成，请检查日志"),
+            ],
+            success: success
+        )
+        alert.addButton(withTitle: success ? "完成" : "返回检查")
+        alert.addButton(withTitle: "复制制作日志")
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard response == .alertSecondButtonReturn, let self else { return }
+            self.copyLogToPasteboard()
+        }
+    }
+
+    private func resultIcon(success: Bool) -> NSImage? {
+        let symbol = success ? "checkmark.circle.fill" : "xmark.octagon.fill"
+        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: success ? "成功" : "失败")
+        return image?.withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 54, weight: .medium))
+    }
+
+    private func resultDetailsView(rows: [(String, String)], success: Bool) -> NSView {
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 9
+        stack.edgeInsets = NSEdgeInsets(top: 12, left: 14, bottom: 12, right: 14)
+
+        for (title, value) in rows {
+            let titleLabel = NSTextField(labelWithString: title)
+            titleLabel.font = .systemFont(ofSize: 12, weight: .semibold)
+            titleLabel.textColor = .secondaryLabelColor
+            titleLabel.alignment = .right
+            titleLabel.widthAnchor.constraint(equalToConstant: 42).isActive = true
+
+            let valueLabel = NSTextField(wrappingLabelWithString: value)
+            valueLabel.font = .systemFont(ofSize: 12.5)
+            valueLabel.textColor = title == "结果" ? (success ? .systemGreen : .systemRed) : .labelColor
+            valueLabel.lineBreakMode = .byTruncatingMiddle
+
+            let row = NSStackView(views: [titleLabel, valueLabel])
+            row.orientation = .horizontal
+            row.alignment = .firstBaseline
+            row.spacing = 12
+            row.widthAnchor.constraint(equalToConstant: 410).isActive = true
+            stack.addArrangedSubview(row)
+        }
+
+        let panel = GlassPanelView(material: .contentBackground, radius: 10)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        panel.addSubview(stack)
+        NSLayoutConstraint.activate([
+            panel.widthAnchor.constraint(equalToConstant: 438),
+            stack.leadingAnchor.constraint(equalTo: panel.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: panel.trailingAnchor),
+            stack.topAnchor.constraint(equalTo: panel.topAnchor),
+            stack.bottomAnchor.constraint(equalTo: panel.bottomAnchor),
+        ])
+        return panel
+    }
+
+    private func appendLog(_ message: String) {
+        let prefix = logTextView.string.isEmpty ? "" : "\n"
+        logTextView.textStorage?.append(NSAttributedString(string: prefix + message))
+        logTextView.scrollToEndOfDocument(nil)
+    }
+
+    @objc private func copyProductionLog() {
+        copyLogToPasteboard()
+    }
+
+    private func copyLogToPasteboard() {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        let copied = pasteboard.setString(logTextView.string, forType: .string)
+        statusLabel.stringValue = copied ? "制作日志已复制到剪贴板" : "无法写入系统剪贴板"
+        if !copied {
+            NSSound.beep()
+        }
+    }
+
+    private func authorizationError(_ status: OSStatus) -> String {
+        let detail = SecCopyErrorMessageString(status, nil) as String? ?? "OSStatus \(status)"
+        return "系统授权失败：\(detail)"
+    }
+
     private func updateWriteButton() {
-        writeButton.isEnabled = imageURL != nil && selectedDevice != nil && monitorTimer == nil
+        writeButton.isEnabled = imageURL != nil && selectedDevice != nil && !isWriting
     }
 
     private func updateProgressState() {
-        let isWriting = monitorTimer != nil
         let hasImage = imageURL != nil
         let hasDisk = selectedDevice != nil
 
-        configureStep(
-            imageStepIcon,
-            symbol: hasImage ? "checkmark.circle.fill" : "1.circle.fill",
-            highlighted: true
-        )
-        configureStep(
-            diskStepIcon,
-            symbol: hasDisk ? "checkmark.circle.fill" : (hasImage ? "2.circle.fill" : "2.circle"),
-            highlighted: hasImage || hasDisk
-        )
-        configureStep(
-            writeStepIcon,
-            symbol: isWriting ? "3.circle.fill" : "3.circle",
-            highlighted: isWriting
-        )
-
-        imageStepSubtitle.stringValue = hasImage ? "镜像已选择" : "选择系统镜像"
-        diskStepSubtitle.stringValue = hasDisk ? "目标已就绪" : "选择目标 U 盘"
-        writeStepSubtitle.stringValue = isWriting ? "正在执行" : "写入启动盘"
+        switch writePhase {
+        case .succeeded:
+            configureStep(imageStepIcon, symbol: "doc.fill", color: .systemGreen)
+            configureStep(diskStepIcon, symbol: "eject.fill", color: .systemGreen)
+            configureStep(writeStepIcon, symbol: "checkmark.circle.fill", color: .systemGreen)
+            imageStepSubtitle.stringValue = "镜像已写入"
+            diskStepSubtitle.stringValue = "已安全弹出"
+            writeStepSubtitle.stringValue = "制作完成"
+        case .failed:
+            configureStep(imageStepIcon, symbol: "doc.fill", color: .secondaryLabelColor)
+            configureStep(diskStepIcon, symbol: "externaldrive.fill", color: .systemOrange)
+            configureStep(writeStepIcon, symbol: "xmark.circle.fill", color: .systemRed)
+            imageStepSubtitle.stringValue = "保留所选镜像"
+            diskStepSubtitle.stringValue = "请检查设备"
+            writeStepSubtitle.stringValue = "制作未完成"
+        case .writing:
+            configureStep(imageStepIcon, symbol: "doc.fill", color: .controlAccentColor)
+            configureStep(diskStepIcon, symbol: "externaldrive.fill", color: .controlAccentColor)
+            configureStep(writeStepIcon, symbol: "arrow.down.circle.fill", color: .controlAccentColor)
+            imageStepSubtitle.stringValue = "使用所选镜像"
+            diskStepSubtitle.stringValue = "目标已锁定"
+            writeStepSubtitle.stringValue = "正在写入"
+        case .idle:
+            configureStep(
+                imageStepIcon,
+                symbol: hasImage ? "doc.fill" : "doc",
+                color: hasImage ? .controlAccentColor : .tertiaryLabelColor
+            )
+            configureStep(
+                diskStepIcon,
+                symbol: hasDisk ? "externaldrive.fill" : "externaldrive",
+                color: hasDisk ? .controlAccentColor : .tertiaryLabelColor
+            )
+            configureStep(writeStepIcon, symbol: "arrow.down.circle", color: .tertiaryLabelColor)
+            imageStepSubtitle.stringValue = hasImage ? "镜像已选择" : "选择系统镜像"
+            diskStepSubtitle.stringValue = hasDisk ? "目标已就绪" : "选择外置 U 盘"
+            writeStepSubtitle.stringValue = hasImage && hasDisk ? "可以开始制作" : "等待准备完成"
+        }
     }
 
-    private func configureStep(_ imageView: NSImageView, symbol: String, highlighted: Bool) {
+    private func configureStep(_ imageView: NSImageView, symbol: String, color: NSColor) {
         imageView.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
-        imageView.contentTintColor = highlighted ? .controlAccentColor : .tertiaryLabelColor
+        imageView.contentTintColor = color
     }
 
     private func showAlert(_ title: String, _ message: String, style: NSAlert.Style = .warning) {

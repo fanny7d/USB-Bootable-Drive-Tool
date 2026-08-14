@@ -21,7 +21,9 @@ A native macOS AppKit utility for writing ISO and IMG images to removable USB dr
 - Automatic discovery and hot-plug refresh for external USB media.
 - Shows only whole, external, removable, writable physical disks.
 - Revalidates disk identity and exact byte capacity before destructive work.
-- Keeps administrator password entry in Terminal and system `sudo`.
+- Uses the macOS system authorization UI instead of opening Terminal; macOS decides whether password, Touch ID, or Apple Watch is available.
+- Shows write state, `dd` progress, and errors in the app's **制作日志** panel.
+- Presents a native result sheet with image, target, elapsed time, eject state, and copyable logs.
 - Writes through `/dev/rdiskN`, then runs `sync` and safely ejects the drive.
 - Custom Dock/Finder icon, standard menus, and accessible UI labels.
 - Reproducible command-line build with no third-party runtime dependencies.
@@ -61,7 +63,7 @@ Available development modes:
 2. Select an `.iso` or `.img` system image.
 3. Confirm the exact target name, capacity, identifier, and protocol.
 4. Click **制作启动盘** and review the destructive confirmation.
-5. Enter the macOS login password in the Terminal window opened by the app.
+5. Complete the macOS system authorization request. The app never receives or stores the credential.
 6. Keep the drive connected until writing, synchronization, and eject complete.
 
 ## Safety model
@@ -69,9 +71,9 @@ Available development modes:
 The app deliberately maintains two independent validation layers:
 
 - The GUI filters candidates using `diskutil` plist data.
-- The Terminal job re-reads the target immediately before unmounting and writing.
+- The authorized task re-reads the target and image size immediately before unmounting and writing.
 
-The GUI never reads or saves an administrator password. See [Architecture](docs/ARCHITECTURE.md) for the full write boundary and safety invariants.
+The app never reads or saves an administrator password, and task output returns to the in-app log through a controlled pipe. See [Architecture](docs/ARCHITECTURE.md) for the full write boundary and safety invariants.
 
 ## Testing
 

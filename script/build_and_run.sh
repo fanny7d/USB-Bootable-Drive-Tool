@@ -32,6 +32,7 @@ build_app() {
     -parse-as-library \
     -framework AppKit \
     -framework Foundation \
+    -framework Security \
     -o "$APP_BINARY" \
     "$ROOT_DIR/Sources/USBBootableDriveTool/main.swift"
 
@@ -44,8 +45,8 @@ build_app() {
   /usr/bin/plutil -insert CFBundleIdentifier -string "$BUNDLE_ID" "$INFO_PLIST"
   /usr/bin/plutil -insert CFBundleExecutable -string "$APP_NAME" "$INFO_PLIST"
   /usr/bin/plutil -insert CFBundlePackageType -string APPL "$INFO_PLIST"
-  /usr/bin/plutil -insert CFBundleShortVersionString -string 1.1.0 "$INFO_PLIST"
-  /usr/bin/plutil -insert CFBundleVersion -string 2 "$INFO_PLIST"
+  /usr/bin/plutil -insert CFBundleShortVersionString -string 1.2.0 "$INFO_PLIST"
+  /usr/bin/plutil -insert CFBundleVersion -string 3 "$INFO_PLIST"
   /usr/bin/plutil -insert CFBundleIconFile -string AppIcon.icns "$INFO_PLIST"
   /usr/bin/plutil -insert CFBundleIconName -string AppIcon "$INFO_PLIST"
   /usr/bin/plutil -insert LSApplicationCategoryType -string public.app-category.utilities "$INFO_PLIST"

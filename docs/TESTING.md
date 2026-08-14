@@ -25,7 +25,7 @@ Only use a disposable physical USB drive with no important data.
 1. Record `diskutil list external physical` and `diskutil info /dev/diskN` before launch.
 2. Select a known-good hybrid ISO/IMG and the disposable target.
 3. Confirm that the destructive alert names the same target.
-4. Complete the Terminal password prompt and observe `dd`, `sync`, and eject.
+4. Complete the macOS system authorization prompt and confirm that validation, `dd` progress, `sync`, and eject output remain inside the app.
 5. Reinsert the media and verify its expected partition/image signature.
 6. Boot-test it on compatible hardware.
 
