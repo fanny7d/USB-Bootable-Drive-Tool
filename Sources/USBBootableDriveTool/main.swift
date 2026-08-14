@@ -188,7 +188,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func buildUI() {
         window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 960, height: 660),
-            styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView],
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
@@ -198,13 +198,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.isMovableByWindowBackground = true
         window.isOpaque = false
         window.backgroundColor = .clear
-        window.minSize = NSSize(width: 860, height: 620)
+        window.contentMinSize = NSSize(width: 840, height: 600)
+        window.contentMaxSize = NSSize(width: 1_240, height: 900)
         window.isReleasedWhenClosed = false
         window.tabbingMode = .disallowed
-        window.setFrameAutosaveName("USBMakerMainWindowV2")
-        window.center()
+        let windowFrameName = NSWindow.FrameAutosaveName("USBMakerMainWindowV4")
+        let restoredWindowFrame = window.setFrameUsingName(windowFrameName)
+        window.setFrameAutosaveName(windowFrameName)
+        if !restoredWindowFrame {
+            window.center()
+        }
 
         imageField.lineBreakMode = .byTruncatingMiddle
+        imageField.maximumNumberOfLines = 1
+        imageField.cell?.usesSingleLineMode = true
+        imageField.cell?.truncatesLastVisibleLine = true
+        imageField.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        imageField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         imageField.toolTip = "镜像文件路径"
         imageField.font = .systemFont(ofSize: 14)
 
@@ -221,6 +231,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         refreshButton.controlSize = .regular
         refreshButton.toolTip = "刷新 U 盘"
         refreshButton.setAccessibilityLabel("刷新 U 盘")
+        diskPopup.target = self
+        diskPopup.action = #selector(diskSelectionChanged)
+        diskPopup.cell?.lineBreakMode = .byTruncatingMiddle
+        diskPopup.cell?.usesSingleLineMode = true
+        diskPopup.cell?.truncatesLastVisibleLine = true
         writeButton.target = self
         writeButton.action = #selector(startWriting)
         writeButton.bezelStyle = .rounded
@@ -235,6 +250,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusLabel.textColor = .secondaryLabelColor
         statusLabel.font = .systemFont(ofSize: 13)
         statusLabel.lineBreakMode = .byTruncatingTail
+        statusLabel.maximumNumberOfLines = 1
+        statusLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        statusLabel.toolTip = statusLabel.stringValue
 
         logTextView.isEditable = false
         logTextView.isSelectable = true
@@ -273,7 +291,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             sidebar.leadingAnchor.constraint(equalTo: background.leadingAnchor),
             sidebar.topAnchor.constraint(equalTo: background.topAnchor),
             sidebar.bottomAnchor.constraint(equalTo: background.bottomAnchor),
-            sidebar.widthAnchor.constraint(equalTo: background.widthAnchor, multiplier: 0.29),
+            sidebar.widthAnchor.constraint(equalToConstant: 264),
 
             workspace.leadingAnchor.constraint(equalTo: sidebar.trailingAnchor),
             workspace.trailingAnchor.constraint(equalTo: background.trailingAnchor),
@@ -421,6 +439,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         footer.alignment = .centerY
         footer.spacing = 16
         statusRow.setContentHuggingPriority(.required, for: .horizontal)
+        statusRow.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         writeButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 126).isActive = true
 
         let content = NSStackView(views: [
@@ -440,11 +459,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         content.translatesAutoresizingMaskIntoConstraints = false
         workspace.addSubview(content)
 
+        let responsiveWidth = content.widthAnchor.constraint(equalTo: workspace.widthAnchor, constant: -72)
+        responsiveWidth.priority = .defaultHigh
+
         NSLayoutConstraint.activate([
-            content.leadingAnchor.constraint(equalTo: workspace.leadingAnchor, constant: 40),
-            content.trailingAnchor.constraint(equalTo: workspace.trailingAnchor, constant: -40),
+            content.centerXAnchor.constraint(equalTo: workspace.centerXAnchor),
+            content.leadingAnchor.constraint(greaterThanOrEqualTo: workspace.leadingAnchor, constant: 36),
+            content.trailingAnchor.constraint(lessThanOrEqualTo: workspace.trailingAnchor, constant: -36),
+            content.widthAnchor.constraint(lessThanOrEqualToConstant: 760),
+            responsiveWidth,
             content.topAnchor.constraint(equalTo: workspace.topAnchor, constant: 72),
-            content.bottomAnchor.constraint(lessThanOrEqualTo: workspace.bottomAnchor, constant: -34),
+            content.bottomAnchor.constraint(equalTo: workspace.bottomAnchor, constant: -34),
             subtitle.widthAnchor.constraint(equalTo: content.widthAnchor),
             preparationPanel.widthAnchor.constraint(equalTo: content.widthAnchor),
             activityPanel.widthAnchor.constraint(equalTo: content.widthAnchor),
@@ -478,11 +503,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
 
         diskPopup.controlSize = .regular
-        diskPopup.widthAnchor.constraint(equalToConstant: 282).isActive = true
+        diskPopup.widthAnchor.constraint(equalToConstant: 260).isActive = true
         refreshButton.widthAnchor.constraint(equalToConstant: 32).isActive = true
         let diskHint = NSTextField(labelWithString: "外置、可移动且可写的整块磁盘")
         diskHint.font = .systemFont(ofSize: 12)
         diskHint.textColor = .secondaryLabelColor
+        diskHint.lineBreakMode = .byTruncatingTail
+        diskHint.maximumNumberOfLines = 1
+        diskHint.toolTip = "仅显示外置、可移动且可写的整块磁盘"
         let diskRow = makePreparationRow(
             symbol: "externaldrive",
             title: "目标 U 盘",
@@ -539,6 +567,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         text.alignment = .leading
         text.spacing = 3
         text.setContentHuggingPriority(.required, for: .horizontal)
+        text.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        detail.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        detail.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         let spacer = NSView()
         spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
@@ -559,11 +590,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         activitySubtitleLabel.font = .systemFont(ofSize: 12)
         activitySubtitleLabel.textColor = .secondaryLabelColor
         activitySubtitleLabel.lineBreakMode = .byTruncatingTail
+        activitySubtitleLabel.maximumNumberOfLines = 1
+        activitySubtitleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         let activityText = NSStackView(views: [activityTitleLabel, activitySubtitleLabel])
         activityText.orientation = .vertical
         activityText.alignment = .leading
         activityText.spacing = 2
+        activityText.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         let header = NSStackView(views: [activityIcon, activityText])
         header.orientation = .horizontal
         header.alignment = .centerY
@@ -595,7 +629,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         logTextView.textContainer?.widthTracksTextView = true
 
         NSLayoutConstraint.activate([
-            panel.heightAnchor.constraint(equalToConstant: 176),
+            panel.heightAnchor.constraint(greaterThanOrEqualToConstant: 150),
             stack.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: 16),
             stack.trailingAnchor.constraint(equalTo: panel.trailingAnchor, constant: -10),
             stack.topAnchor.constraint(equalTo: panel.topAnchor, constant: 14),
@@ -604,6 +638,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             separator.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -6),
             scrollView.widthAnchor.constraint(equalTo: stack.widthAnchor),
         ])
+        panel.setContentHuggingPriority(.defaultLow, for: .vertical)
         return panel
     }
 
@@ -624,7 +659,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         writePhase = .idle
         imageField.stringValue = url.lastPathComponent
         imageField.toolTip = url.path
-        statusLabel.stringValue = readinessStatus()
+        setStatus(readinessStatus())
         updateWriteButton()
         updateProgressState()
     }
@@ -640,7 +675,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         diskPopup.isEnabled = false
         refreshButton.isEnabled = false
         if !isWriting && writePhase == .idle {
-            statusLabel.stringValue = "正在扫描外置 U 盘…"
+            setStatus("正在扫描外置 U 盘…")
         }
         updateWriteButton()
         updateProgressState()
@@ -662,6 +697,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if devices.isEmpty {
             diskPopup.addItem(withTitle: "未发现可写的外置 U 盘")
             diskPopup.isEnabled = false
+            diskPopup.toolTip = nil
         } else {
             devices.forEach { diskPopup.addItem(withTitle: $0.displayName) }
             diskPopup.isEnabled = true
@@ -670,15 +706,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 diskPopup.selectItem(at: index)
             }
             diskPopup.synchronizeTitleAndSelectedItem()
+            diskPopup.toolTip = selectedDevice?.displayName
         }
 
         if writePhase == .idle {
-            statusLabel.stringValue = readinessStatus()
+            setStatus(readinessStatus())
         } else if writePhase == .succeeded {
-            statusLabel.stringValue = "制作完成，U 盘已安全弹出"
+            setStatus("制作完成，U 盘已安全弹出")
         }
 
         refreshButton.isEnabled = !isWriting
+        updateWriteButton()
+        updateProgressState()
+    }
+
+    @objc private func diskSelectionChanged() {
+        diskPopup.toolTip = selectedDevice?.displayName
+        if writePhase == .idle {
+            setStatus(readinessStatus())
+        }
         updateWriteButton()
         updateProgressState()
     }
@@ -859,7 +905,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         refreshButton.isEnabled = false
         diskPopup.isEnabled = false
         writeButton.isEnabled = false
-        statusLabel.stringValue = "正在请求 macOS 系统授权…"
+        setStatus("正在请求 macOS 系统授权…")
         logTextView.string = ""
         appendLog("准备制作启动盘")
         appendLog("正在请求系统管理员授权；验证方式由 macOS 决定。")
@@ -984,8 +1030,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self else { return }
             self.appendLog(message)
             if state != "OUTPUT" {
-                self.statusLabel.stringValue = message
-                self.activitySubtitleLabel.stringValue = message
+                self.setStatus(message)
+                self.setActivitySubtitle(message)
             }
         }
 
@@ -1009,7 +1055,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.spinner.stopAnimation(nil)
             self.chooseButton.isEnabled = true
             self.refreshButton.isEnabled = true
-            self.statusLabel.stringValue = message
+            self.setStatus(message)
             if !self.logTextView.string.hasSuffix(message) {
                 self.appendLog(message)
             }
@@ -1066,10 +1112,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             titleLabel.alignment = .right
             titleLabel.widthAnchor.constraint(equalToConstant: 42).isActive = true
 
-            let valueLabel = NSTextField(wrappingLabelWithString: value)
+            let valueLabel = NSTextField(labelWithString: value)
             valueLabel.font = .systemFont(ofSize: 12.5)
             valueLabel.textColor = title == "结果" ? (success ? .systemGreen : .systemRed) : .labelColor
             valueLabel.lineBreakMode = .byTruncatingMiddle
+            valueLabel.maximumNumberOfLines = 1
+            valueLabel.toolTip = value
+            valueLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
             let row = NSStackView(views: [titleLabel, valueLabel])
             row.orientation = .horizontal
@@ -1096,6 +1145,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let prefix = logTextView.string.isEmpty ? "" : "\n"
         logTextView.textStorage?.append(NSAttributedString(string: prefix + message))
         logTextView.scrollToEndOfDocument(nil)
+    }
+
+    private func setStatus(_ message: String) {
+        statusLabel.stringValue = message
+        statusLabel.toolTip = message
+    }
+
+    private func setActivitySubtitle(_ message: String) {
+        activitySubtitleLabel.stringValue = message
+        activitySubtitleLabel.toolTip = message
     }
 
     private func authorizationError(_ status: OSStatus) -> String {
@@ -1134,7 +1193,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             writeStepSubtitle.stringValue = "制作完成"
             configureStep(activityIcon, symbol: "checkmark.circle.fill", color: .systemGreen)
             activityTitleLabel.stringValue = "制作完成"
-            activitySubtitleLabel.stringValue = "镜像已写入，U 盘已安全弹出"
+            setActivitySubtitle("镜像已写入，U 盘已安全弹出")
         case .failed:
             configureStep(imageStepIcon, symbol: "doc.fill", color: .secondaryLabelColor)
             configureStep(diskStepIcon, symbol: "externaldrive.fill", color: .systemOrange)
@@ -1144,7 +1203,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             writeStepSubtitle.stringValue = "制作未完成"
             configureStep(activityIcon, symbol: "xmark.octagon.fill", color: .systemRed)
             activityTitleLabel.stringValue = "制作未完成"
-            activitySubtitleLabel.stringValue = statusLabel.stringValue
+            setActivitySubtitle(statusLabel.stringValue)
         case .writing:
             configureStep(imageStepIcon, symbol: "doc.fill", color: .controlAccentColor)
             configureStep(diskStepIcon, symbol: "externaldrive.fill", color: .controlAccentColor)
@@ -1154,7 +1213,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             writeStepSubtitle.stringValue = "正在写入"
             configureStep(activityIcon, symbol: "arrow.down.circle.fill", color: .controlAccentColor)
             activityTitleLabel.stringValue = "正在制作启动盘"
-            activitySubtitleLabel.stringValue = statusLabel.stringValue
+            setActivitySubtitle(statusLabel.stringValue)
         case .idle:
             configureStep(
                 imageStepIcon,
@@ -1176,7 +1235,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 color: hasImage && hasDisk ? .controlAccentColor : .tertiaryLabelColor
             )
             activityTitleLabel.stringValue = hasImage && hasDisk ? "准备就绪" : "等待开始"
-            activitySubtitleLabel.stringValue = readinessStatus()
+            setActivitySubtitle(readinessStatus())
         }
     }
 

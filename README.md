@@ -17,6 +17,7 @@ A native macOS AppKit utility for writing ISO and IMG images to removable USB dr
 ## Features
 
 - Native AppKit interface with macOS system materials.
+- Resizable utility window with bounded sizing, responsive log space, and stable truncation for long image or device names.
 - ISO and IMG image selection.
 - Automatic discovery and hot-plug refresh for external USB media.
 - Shows only whole, external, removable, writable physical disks.

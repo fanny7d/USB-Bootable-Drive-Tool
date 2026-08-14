@@ -16,6 +16,7 @@ All notable changes to this project are documented here. The format follows [Kee
 - Prevented normal app termination while a privileged write is active, avoiding accidental pipe closure during destructive work.
 - Replaced mixed numbered/checkmark sidebar steps with semantic image, device, and write-state icons.
 - Removed the persistent warning card from the workspace; destructive guidance now appears only in the final confirmation sheet.
+- Made the main window resizable with bounded restoration, a fixed-width sidebar, responsive log space, and stable truncation for long image or device names.
 
 ### Security
 
